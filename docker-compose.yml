@@ -1,5 +1,3 @@
-version: '3'
-
 # NOTES
 # - Some environment variables are actually set in the file `.env` in the same directory.
 #   This allows, if you wish, to change some values and not having to modify this file.
