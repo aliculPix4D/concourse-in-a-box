@@ -33,7 +33,7 @@ services:
     entrypoint: /scripts/minio-setup.sh
 
   vault:
-    image: vault:1.7.1
+    image: vault:1.13.1
     command: server -dev
     ports:
     - 8200:8200
