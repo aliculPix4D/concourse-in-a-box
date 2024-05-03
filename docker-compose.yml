@@ -46,7 +46,7 @@ services:
 
   # This container will stop as soon as the script has run.
   vault-setup:
-    image: vault:1.7.1
+    image: vault:1.13.1
     depends_on:
     - vault
     volumes:
