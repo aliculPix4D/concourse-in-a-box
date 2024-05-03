@@ -7,8 +7,8 @@ set -e
 : "${VAULT_DEV_ROOT_TOKEN_ID?Need to set this environment variable}"
 : "${MINIO_ADDR?Need to set this environment variable}"
 : "${MINIO_REGION_NAME?Need to set this environment variable}"
-: "${MINIO_ACCESS_KEY?Need to set this environment variable}"
-: "${MINIO_SECRET_KEY?Need to set this environment variable}"
+: "${MINIO_ROOT_USER?Need to set this environment variable}"
+: "${MINIO_ROOT_PASSWORD?Need to set this environment variable}"
 
 # FIXME This should be replaced by a more robust healthcheck, see
 # https://docs.docker.com/compose/compose-file/compose-file-v3/#healthcheck
@@ -35,5 +35,5 @@ echo
 echo "***** Adding secrets"
 vault kv put /concourse/main/s3-endpoint   value="$MINIO_ADDR"
 vault kv put /concourse/main/s3-region     value="$MINIO_REGION_NAME"
-vault kv put /concourse/main/s3-access-key value="$MINIO_ACCESS_KEY"
-vault kv put /concourse/main/s3-secret-key value="$MINIO_SECRET_KEY"
+vault kv put /concourse/main/s3-access-key value="$MINIO_ROOT_USER"
+vault kv put /concourse/main/s3-secret-key value="$MINIO_ROOT_PASSWORD"

@@ -18,8 +18,8 @@ services:
     - 9001:9001
     environment:
       MINIO_REGION_NAME: &minio-region ${MINIO_REGION_NAME}
-      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
 
   # This container will stop as soon as the script has run.
   minio-setup:
@@ -30,8 +30,8 @@ services:
     - "./scripts:/scripts"
     environment:
       MINIO_ADDR: &minio-addr http://minio:9000
-      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
     entrypoint: /scripts/minio-setup.sh
 
   vault:
@@ -57,8 +57,8 @@ services:
       VAULT_DEV_ROOT_TOKEN_ID: ${VAULT_DEV_ROOT_TOKEN_ID}
       MINIO_ADDR : *minio-addr
       MINIO_REGION_NAME: *minio-region
-      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
 
     entrypoint: /scripts/vault-setup.sh
 
