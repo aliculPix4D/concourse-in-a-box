@@ -1,0 +1,9 @@
+project: pix4d-sam-inference
+branch-is-stable: false
+upload_conan_package: true
+team: developers
+u22_cuda_version: "11_7"
+gchat_hook: ((gchat_hook_analytics_notifications_sandbox))
+gchat_perftracker: ((gchat_hook_analytics_notifications))
+time-trigger-check-period: never # Never trigger on feature branches
+perftracker_dest: artifacts

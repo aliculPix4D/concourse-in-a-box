@@ -1,0 +1,14 @@
+resources:
+- name: repo.git
+  type: git
+  icon: github
+  source:
+    uri: https://github.com/aliculPix4D/concourse-in-a-box
+    branch: pci-3786-opa-investigation
+
+jobs:
+- name: set-misconfigured-pipeline
+  plan:
+  - get: repo.git
+  - set_pipeline: misconfigured-pipeline
+    file: repo.git/pipeline.yml
