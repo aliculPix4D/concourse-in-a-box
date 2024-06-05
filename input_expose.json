@@ -1,0 +1,8 @@
+{
+    "service": "concourse",
+    "cluster_name": "dev",
+    "cluster_version": "7.4.0",
+    "action": "ExposePipeline",
+    "team": "main",
+    "pipeline": "simple"
+}

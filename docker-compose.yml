@@ -119,8 +119,7 @@ services:
       CONCOURSE_ENABLE_RESOURCE_CAUSALITY: "true"
       # OPA
       CONCOURSE_OPA_URL: http://opa:8181/v1/data/concourse/decision
-      CONCOURSE_POLICY_CHECK_FILTER_HTTP_METHOD: PUT,POST
-      CONCOURSE_POLICY_CHECK_FILTER_ACTION: UseImage,SetPipeline,SaveConfig
+      CONCOURSE_POLICY_CHECK_FILTER_ACTION: ExposePipeline,UseImage,SetPipeline,SaveConfig
 
       # CONCOURSE_OPA_RESULT_ALLOW_KEY: result.allowed
       # CONCOURSE_OPA_RESULT_SHOULD_BLOCK_KEY: result.block

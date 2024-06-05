@@ -1,0 +1,10 @@
+{
+    "action":"SaveConfig",
+    "data":{
+        "resources":[
+            {"name":"image.docker","type":"registry-image"},
+            {"name":"repo.git","type":"git","check_every":"24h"},
+            {"name":"repo.git","type":"git","webhook_token":"((concourse_gh_webhook))"}
+        ]
+    }
+}

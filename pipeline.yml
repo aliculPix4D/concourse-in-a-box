@@ -110,7 +110,6 @@ resources:
 - name: shared-deps.git
   type: git
   icon: git
-  webhook_token: ((concourse_gh_webhook))
   source:
     uri: git@github.com:Pix4D/pix4d-algo-conan-deps.git
     private_key: ((github_ssh_key))
