@@ -86,3 +86,45 @@ test_saveconfig_denied_if_low if {
 
 	concourse.decision == expected with input as input_fixture
 }
+
+test_saveconfig_soft_denied_if_public_job if {
+	input_fixture := {
+		"action": "SaveConfig",
+		"data": {"jobs": [{"name": "job-1", "public": true, "max_in_flight": 1}]},
+	}
+	expected := {
+		"allowed": false,
+		"block": false,
+		"reasons": {"Job cannot be public"},
+	}
+
+	concourse.decision == expected with input as input_fixture
+}
+
+test_saveconfig_soft_denied_if_max_in_flight_not_set if {
+	input_fixture := {
+		"action": "SaveConfig",
+		"data": {"jobs": [{"name": "job-1"}]},
+	}
+	expected := {
+		"allowed": false,
+		"block": false,
+		"reasons": {"Each job must have max_in_flight key configured"},
+	}
+
+	concourse.decision == expected with input as input_fixture
+}
+
+test_saveconfig_soft_denied_if_max_in_flight_set_wrongly if {
+	input_fixture := {
+		"action": "SaveConfig",
+		"data": {"jobs": [{"name": "job-1", "max_in_flight": 2}]},
+	}
+	expected := {
+		"allowed": false,
+		"block": false,
+		"reasons": {"Each job must have max_in_flight key set to 1"},
+	}
+
+	concourse.decision == expected with input as input_fixture
+}

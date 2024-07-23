@@ -7,9 +7,53 @@ import rego.v1
 # entrypoint: true
 default decision := {"allowed": true}
 
-decision := {"allowed": false, "reasons": reasons} if {
+decision := {"allowed": false, "reasons": deny} if {
 	count(deny) > 0
-	reasons := deny
+}
+
+# Soft-policy enforcement
+# Note that documentation: https://concourse-ci.org/opa.html#writing-opa-rules about soft policy enforcement
+# is not correct. See the actual implemenation for more details:
+# https://github.com/concourse/concourse/blob/master/atc/api/policychecker/handler.go#L44
+decision := {"allowed": false, "block": false, "reasons": soft_deny} if {
+	count(soft_deny) > 0
+}
+
+# METADATA
+# title: Public job
+# description: Job cannot be public
+# scope: rule
+soft_deny contains msg if {
+	msg := rego.metadata.rule().description
+	input.action in {"SaveConfig", "SetPipeline"}
+	some job in input.data.jobs
+	job.public
+}
+
+# METADATA
+# title: Serial job
+# description: Each job must have max_in_flight key configured
+# scope: rule
+soft_deny contains msg if {
+	msg := rego.metadata.rule().description
+	input.action in {"SaveConfig", "SetPipeline"}
+	count(input.data.jobs) != count(jobs_with_max_in_flight)
+}
+
+# METADATA
+# title: Serial job
+# description: Each job must have max_in_flight key set to 1
+# scope: rule
+soft_deny contains msg if {
+	msg := rego.metadata.rule().description
+	input.action in {"SaveConfig", "SetPipeline"}
+	some job in input.data.jobs
+	job.max_in_flight != 1
+}
+
+jobs_with_max_in_flight contains job if {
+	some job in input.data.jobs
+	job.max_in_flight != null
 }
 
 # METADATA
@@ -32,18 +76,18 @@ deny contains msg if {
 }
 
 git_resources contains r if {
-	r := input.data.resources[_]
+	some r in input.data.resources
 	r.type == "git"
 }
 
 git_resources_with_webhooks contains r if {
-	r := input.data.resources[_]
+	some r in input.data.resources
 	r.type == "git"
 	r.webhook_token != null
 }
 
 git_resources_with_check contains r if {
-	r := input.data.resources[_]
+	some r in input.data.resources
 	r.type == "git"
 	r.check_every != null
 	time.parse_duration_ns(r.check_every) >= time.parse_duration_ns("24h")
