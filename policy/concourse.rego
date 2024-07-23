@@ -22,8 +22,8 @@ deny contains msg if {
 }
 
 # METADATA
-# title: SaveConfig
-# description: Git resource must have webhooks or check_every with large value (24h) configured
+# title: SaveConfig or SetPipeline
+# description: "Git resource must have webhook_token or check_every: 24h configured"
 # scope: rule
 deny contains msg if {
 	msg := rego.metadata.rule().description
@@ -36,7 +36,7 @@ git_resources contains r if {
 	r.type == "git"
 }
 
-git_resources_with_webhoks contains r if {
+git_resources_with_webhooks contains r if {
 	r := input.data.resources[_]
 	r.type == "git"
 	r.webhook_token != null
@@ -50,6 +50,6 @@ git_resources_with_check contains r if {
 }
 
 valid_git_resources if {
-	count(git_resources_with_webhoks & git_resources_with_check) == 0
-	count(git_resources_with_webhoks | git_resources_with_check) == count(git_resources)
+	count(git_resources_with_webhooks & git_resources_with_check) == 0
+	count(git_resources_with_webhooks | git_resources_with_check) == count(git_resources)
 }

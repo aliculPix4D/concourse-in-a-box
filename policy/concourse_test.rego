@@ -49,7 +49,7 @@ test_saveconfig_denied_if_neither if {
 	}
 	expected := {
 		"allowed": false,
-		"reasons": {"Git resource must have webhooks or check_every with large value (24h) configured"},
+		"reasons": {"Git resource must have webhook_token or check_every: 24h configured"},
 	}
 
 	concourse.decision == expected with input as input_fixture
@@ -65,7 +65,7 @@ test_saveconfig_denied_if_both if {
 	}
 	expected := {
 		"allowed": false,
-		"reasons": {"Git resource must have webhooks or check_every with large value (24h) configured"},
+		"reasons": {"Git resource must have webhook_token or check_every: 24h configured"},
 	}
 
 	concourse.decision == expected with input as input_fixture
@@ -81,7 +81,7 @@ test_saveconfig_denied_if_low if {
 	}
 	expected := {
 		"allowed": false,
-		"reasons": {"Git resource must have webhooks or check_every with large value (24h) configured"},
+		"reasons": {"Git resource must have webhook_token or check_every: 24h configured"},
 	}
 
 	concourse.decision == expected with input as input_fixture
