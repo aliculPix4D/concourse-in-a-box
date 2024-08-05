@@ -8,6 +8,21 @@
 
 
 services:
+  opa:
+    build:
+      context: .
+    image: docker.io/openpolicyagent/opa:0.67.0-static
+    command:
+    - run
+    - --server
+    - --log-level=debug
+    - --watch
+    - /concourse_opa_policies
+    volumes:
+      - ./concourse_opa_policies:/concourse_opa_policies
+    ports:
+      - 8181:8181
+
   minio:
     image: minio/minio
     command: server /minio-storage --console-address ":9001"
@@ -102,6 +117,15 @@ services:
       CONCOURSE_VAULT_CLIENT_TOKEN: ${VAULT_DEV_ROOT_TOKEN_ID}
       CONCOURSE_ENABLE_CACHE_STREAMED_VOLUMES: "true"
       CONCOURSE_ENABLE_RESOURCE_CAUSALITY: "true"
+      # OPA
+      CONCOURSE_OPA_URL: http://opa:8181/v1/data/concourse/decision
+      CONCOURSE_POLICY_CHECK_FILTER_ACTION: ExposePipeline,UseImage,SetPipeline,SaveConfig
+
+      # CONCOURSE_OPA_RESULT_ALLOW_KEY: result.allowed
+      # CONCOURSE_OPA_RESULT_SHOULD_BLOCK_KEY: result.block
+      # CONCOURSE_OPA_RESULT_MESSAGES_KEY: result.reasons
+      # CONCOURSE_POLICY_CHECK_FILTER_ACTION: UseImage,SetPipeline,SaveConfig
+      # CONCOURSE_POLICY_CHECK_FILTER_ACTION_SKIP: PausePipeline,UnpausePipeline,ListWorkers,ListContainers
 
   # This container will stop as soon as the script has run.
   web-setup:
