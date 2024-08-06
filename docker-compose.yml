@@ -72,6 +72,8 @@ services:
       MINIO_REGION_NAME: *minio-region
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      GITHUB_SSH_KEY: ${GITHUB_SSH_KEY}
+      GITHUB_TOKEN: ${GITHUB_TOKEN}
 
     entrypoint: /scripts/vault-setup.sh
 

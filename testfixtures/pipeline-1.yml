@@ -1,0 +1,70 @@
+resource_types:
+- name: cogito
+  type: registry-image
+  check_every: 24h
+  source:
+    repository: pix4d/cogito
+    tag: latest
+
+resources:
+- name: repo.git
+  type: git
+  icon: git
+  check_every: 24h
+  source:
+    uri: git@github.com:pix4d/test-bootgen-single-project.git
+    branch: master
+    private_key: ((github_ssh_key))
+
+- name: gh-status
+  type: cogito
+  check_every: never
+  source:
+    owner: pix4d
+    repo: test-bootgen-single-project
+    access_token: ((github_repo_status_token))
+
+jobs:
+- name: standard-path
+  max_in_flight: 1
+  on_success:
+    put: gh-status
+    no_get: true
+    inputs: [repo.git]
+    params: {state: success}
+  on_failure:
+    put: gh-status
+    no_get: true
+    inputs: [repo.git]
+    params: {state: failure}
+  on_error:
+    put: gh-status
+    no_get: true
+    inputs: [repo.git]
+    params: {state: error}
+  plan:
+  - get: repo.git
+  - put: gh-status
+    inputs: [repo.git]
+    no_get: true
+    params: {state: pending}
+
+- name: do-path
+  max_in_flight: 1
+  plan:
+  - do:
+    - get: repo.git
+    - put: gh-status
+      inputs: [repo.git]
+      no_get: true
+      params: {state: pending}
+
+- name: in-parallel-path
+  max_in_flight: 1
+  plan:
+  - in_parallel:
+    - get: repo.git
+    - put: gh-status
+      inputs: [repo.git]
+      no_get: true
+      params: {state: pending}
