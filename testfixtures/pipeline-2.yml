@@ -1,0 +1,871 @@
+---
+base-job: &base-job
+  max_in_flight: 1
+  on_success:
+    try:
+      put: github-status
+      inputs:
+      - repo.git
+      no_get: true
+      params:
+        state: success
+  on_failure:
+    try:
+      put: github-status
+      inputs:
+      - repo.git
+      no_get: true
+      params:
+        state: failure
+  on_error:
+    try:
+      put: github-status
+      inputs:
+      - repo.git
+      no_get: true
+      params:
+        state: error
+  on_abort:
+    try:
+      put: github-status
+      inputs:
+      - repo.git
+      no_get: true
+      params:
+        state: abort
+
+pending:
+  - &pending
+    try:
+      put: github-status
+      inputs:
+      - repo.git
+      no_get: true
+      params:
+        state: pending
+
+conan-params: &conan-params
+  CONAN_URL: https://conan.ci.pix4d.com
+  CONAN_LOGIN_USERNAME: ((conan_ro_username))
+  CONAN_PASSWORD: ((conan_ro_password))
+
+conan-pkg-params: &conan-pkg-params
+  CONAN_URL: https://conan.ci.pix4d.com
+  CONAN_LOGIN_USERNAME: ((conan_rw_username))
+  CONAN_PASSWORD: ((conan_rw_password))
+  CONAN_CHANNEL: ((branch))
+
+s3-creds: &s3-creds
+  access_key_id: ((concourse_user_access_key))
+  secret_access_key: ((concourse_user_secret_key))
+
+s3-params: &s3-params
+  bucket: ci-pix4d-concourse-pipeline
+  region_name: eu-west-1
+  <<: *s3-creds
+
+s3-deploy-params: &s3-deploy-params
+  bucket: ((deploy_bucket))
+  region_name: us-east-1
+  <<: *s3-creds
+
+license-test-params: &license-test-params
+  VORTEX_USER_01_CLIENT_ID: ((vortex_user_01_client_id))
+  VORTEX_USER_01_CLIENT_SECRET: ((vortex_user_01_client_secret))
+  VORTEX_USER_01_LICENSE_KEY: ((vortex_user_01_license_key))
+  VORTEX_USER_02_CLIENT_ID: ((vortex_user_02_client_id))
+  VORTEX_USER_02_CLIENT_SECRET: ((vortex_user_02_client_secret))
+  VORTEX_USER_02_LICENSE_KEY: ((vortex_user_02_license_key))
+  ELS_URL: http://test-support-services.internal:7071
+
+docker-registry-config: &docker-registry-config
+  username: ((docker_cloud_pix4d_user))
+  password: ((docker_cloud_pix4d_password))
+
+artifactory-credentials: &artifactory-credentials
+  authenticate: in
+  username: concourse
+  password: ((concourse_artifactory_password))
+
+####################################################################################################
+
+resource_types:
+
+  - name: cogito
+    type: registry-image
+    check_every: 24h
+    source:
+      repository: pix4d/cogito
+      tag: latest
+
+  - name: pypi
+    type: registry-image
+    check_every: 24h
+    source:
+      repository: cfplatformeng/concourse-pypi-resource
+      tag: latest
+
+  - name: s3-simple
+    type: registry-image
+    check_every: 24h
+    source:
+      <<: *docker-registry-config
+      repository: docker.ci.pix4d.com/s3-resource-simple
+      tag: latest
+
+  - name: cron-resource
+    type: registry-image
+    check_every: 24h
+    source:
+      repository: cftoolsmiths/cron-resource
+
+
+####################################################################################################
+
+resources:
+
+- name: github-status
+  type: cogito
+  check_every: never
+  source:
+    owner: pix4d
+    repo: pix4d-vortex
+    access_token: ((github_repo_status_token))
+    gchat_webhook: ((gchat_hook))
+
+- name: engine-gchat
+  type: cogito
+  check_every: never
+  source:
+    sinks:
+      - gchat
+    gchat_webhook: ((gchat_hook))
+
+- name: repo.git
+  type: git
+  webhook_token: ((concourse_gh_webhook))
+  source:
+    uri: git@github.com:Pix4d/pix4d-vortex.git
+    private_key: ((github_ssh_key))
+    branch: ((branch))
+
+###################################################
+# IMPORTANT: keep 24h check interval.
+# This is a special resource for lengthy jobs
+# which should only run automatically once per day,
+# if there has been a change in the commit ID since
+# the last run.
+- name: repo-24h.git
+  type: git
+  check_every: 24h
+  source:
+    uri: git@github.com:Pix4d/pix4d-vortex.git
+    private_key: ((github_ssh_key))
+    branch: ((branch))
+    disable-global-resource: pix4d-vortex # hack for different behavior to repo.git.
+###################################################
+
+- name: python.docker
+  type: registry-image
+  icon: docker
+  check_every: 24h
+  source:
+    repository: python
+    tag: 3.10.6
+
+
+### Ubuntu 22.04 Jammy Jellyfish #########################################################
+
+- name: ubuntu-22.04.docker
+  type: registry-image
+  check_every: 24h
+  source:
+    <<: *docker-registry-config
+    repository: docker.ci.pix4d.com/cpp-builder-ubuntu-22.04
+    tag: 20231025072228
+
+- name: valgrind-cpython-ubuntu-22.04.docker
+  type: registry-image
+  check_every: 24h
+  source:
+    <<: *docker-registry-config
+    repository: docker.ci.pix4d.com/cpp-builder-ubuntu-22.04-valgrind-cpython
+    tag: 20231220085746
+
+- name: tester-ubuntu-22.04.docker
+  type: registry-image
+  check_every: 24h
+  source:
+    <<: *docker-registry-config
+    repository: docker.ci.pix4d.com/cpp-tester-ubuntu-22.04
+    tag: 20221010040705
+
+- name: conan-builder-ubuntu-22.04.docker
+  type: registry-image
+  check_every: 24h
+  source:
+    <<: *docker-registry-config
+    repository: docker.ci.pix4d.com/conan-builder-ubuntu-22.04
+    tag: 20230201142824
+
+- name: conan-builder-ubuntu-22.04-cuda.docker
+  type: registry-image
+  check_every: 24h
+  source:
+    <<: *docker-registry-config
+    repository: docker.ci.pix4d.com/conan-builder-ubuntu-22.04-cuda-11.7-cudnn-8
+    tag: 20221010134654
+
+- name: rc-whl-ubuntu-22.04.s3
+  type: s3
+  source:
+    regexp: ((output_dst))/((project))/((branch))/pix4dvortex_ext-(.*)-linux_x86_64\.whl
+    <<: *s3-params
+
+- name: rc-whl-ubuntu-22.04-int.s3
+  type: s3
+  source:
+    regexp: ((output_dst))/((project))/((branch))/pix4dvortex-(.*)-linux_x86_64\.whl
+    <<: *s3-params
+
+- name: rel-whl-ubuntu-22.04.s3
+  type: s3
+  source:
+    regexp: engine/((base_version))/pix4dvortex_ext-(.*)-linux_x86_64\.whl
+    <<: *s3-deploy-params
+
+### Windows ##############################################################################
+
+- name: rc-whl-windows.s3
+  type: s3
+  source:
+    regexp: ((output_dst))/((project))/((branch))/pix4dvortex_ext-(.*)-win_amd64\.whl
+    <<: *s3-params
+
+- name: rc-whl-windows-int.s3
+  type: s3
+  source:
+    regexp: ((output_dst))/((project))/((branch))/pix4dvortex-(.*)-win_amd64\.whl
+    <<: *s3-params
+
+- name: rel-whl-windows.s3
+  type: s3
+  source:
+    regexp: engine/((base_version))/pix4dvortex_ext-(.*)-win_amd64\.whl
+    <<: *s3-deploy-params
+
+- name: docs.s3
+  type: s3
+  source:
+    regexp: ((output_dst))/((project))/((branch))/docs/htmldoc-(.*)\.tar\.gz
+    <<: *s3-params
+
+- name: untarred-docs.s3
+  type: s3-simple
+  check_every: never
+  source:
+    <<: *s3-params
+    region: eu-west-1  # region key name differs from resource `s3` region key name...
+    path: ((output_dst))/((project))/((branch))/docs/
+    sync: false # Disable downloading.
+    options:
+      # FIXME! `--recursive` is _currently_ needed to copy a directory :-(
+      - --recursive
+
+- name: rel-docs.s3
+  type: s3
+  check_every: never
+  source:
+    regexp: engine/((base_version))/htmldoc-(.*)\.tar\.gz
+    <<: *s3-deploy-params
+
+- name: rel-docs.git
+  type: git
+  webhook_token: ((concourse_gh_webhook))
+  source:
+    uri: git@github.com:Pix4D/pix4d-engine-docs.git
+    private_key: ((docs_github_deploy_key_private))
+    branch: master
+
+- name: rel-whl.pypi
+  type: pypi
+  check_every: never
+  source:
+    name: pix4dvortex
+    packaging: any
+    pre_release: true
+    python_version: "3.10"
+    repository:
+      <<: *artifactory-credentials
+      authenticate: in
+      index_url: https://artifactory.ci.pix4d.com/artifactory/api/pypi/pix4d-pypi-local/simple
+      repository_url: https://artifactory.ci.pix4d.com/artifactory/api/pypi/pix4d-pypi-local
+
+- name: biweekly-7-30.cron
+  type: cron-resource
+  check_every: 1h
+  source:
+    expression: "30 7 * * MON,WED"
+    location: "CET"
+    fire_immediately: true
+
+####################################################################################################
+
+jobs:
+
+- name: code-check
+  <<: *base-job
+  plan:
+  - get: ubuntu-22.04.docker
+  - get: repo.git
+    trigger: ((trigger))
+    params:
+      submodules: [conan-profiles, pix4d_build_tools]
+      disable_git_lfs: true
+  - *pending
+  - in_parallel:
+     - task: lint
+       image: ubuntu-22.04.docker
+       file: repo.git/ci/tasks/lint-linux.yml
+       params:
+         PLATFORM: ubuntu-22.04
+     - task: cppcheck
+       image: ubuntu-22.04.docker
+       file: repo.git/ci/tasks/cppcheck.yml
+       params:
+         <<: *conan-params
+         CONAN_PROFILE: conan-profiles/.conan/profiles/gcc-ubuntu-22.04
+         PLATFORM: ubuntu-22.04
+         VORTEX_WITH_AUTH: 1
+         VORTEX_WITH_SYS_TESTS: 1
+
+### Ubuntu 22.04 Jammy Jellyfish #########################################################
+
+- name: build-wheel-ubuntu-22.04-int
+  <<: *base-job
+  plan:
+  - get: repo.git
+    passed: [code-check]
+    trigger: true
+    params:
+      submodules: [conan-profiles, pix4d_build_tools]
+      disable_git_lfs: true
+  - *pending
+  - get: ubuntu-22.04.docker
+  - task: build-wheel
+    image: ubuntu-22.04.docker
+    file: repo.git/ci/tasks/build-wheel-linux.yml
+    input_mapping: { src-repo: repo.git }
+    params:
+      <<: *conan-params
+      CONAN_PROFILE: conan-profiles/.conan/profiles/gcc-ubuntu-22.04
+      PLATFORM: ubuntu-22.04
+  - put: rc-whl-ubuntu-22.04-int.s3
+    inputs: [rc-build]
+    no_get: true
+    params:
+      file: rc-build/pix4dvortex-*.whl
+
+- name: build-wheel-ubuntu-22.04
+  <<: *base-job
+  plan:
+  - get: repo.git
+    passed: [code-check]
+    trigger: true
+    params:
+      submodules: [conan-profiles, pix4d_build_tools]
+      disable_git_lfs: true
+  - *pending
+  - get: ubuntu-22.04.docker
+  - task: build-wheel
+    image: ubuntu-22.04.docker
+    file: repo.git/ci/tasks/build-wheel-linux.yml
+    input_mapping: { src-repo: repo.git }
+    params:
+      <<: *conan-params
+      CONAN_PROFILE: conan-profiles/.conan/profiles/gcc-ubuntu-22.04
+      PLATFORM: ubuntu-22.04
+      VORTEX_WITH_AUTH: 1
+      VORTEX_WITH_SYS_TESTS: 1
+      ELS_URL: http://test-support-services.internal:7071
+      ELS_MAX_FEATURE_COUNT: 1200000000
+  - put: rc-whl-ubuntu-22.04.s3
+    inputs: [rc-build]
+    no_get: true
+    params:
+      file: rc-build/pix4dvortex_ext-*.whl
+
+- name: test-ubuntu-22.04
+  <<: *base-job
+  plan:
+  - get: repo.git
+    passed: [build-wheel-ubuntu-22.04]
+    trigger: true
+    params:
+      submodules: [vortex-testdata, pix4d-opf-spec]
+      disable_git_lfs: true
+  - *pending
+  - get: rc-whl-ubuntu-22.04.s3
+    passed: [build-wheel-ubuntu-22.04]
+  - get: tester-ubuntu-22.04.docker
+  - task: test
+    image: tester-ubuntu-22.04.docker
+    file: repo.git/ci/tasks/test-linux.yml
+    input_mapping: { wheel-dir: rc-whl-ubuntu-22.04.s3}
+    params:
+      <<: *license-test-params
+      PLATFORM: ubuntu-22.04
+      TOX_ENVS: py310
+
+- name: test-ubuntu-22.04-int
+  <<: *base-job
+  plan:
+  - get: repo.git
+    passed: [build-wheel-ubuntu-22.04-int]
+    trigger: false
+    params:
+      submodules: [vortex-testdata, pix4d-opf-spec]
+      disable_git_lfs: true
+  - *pending
+  - get: rc-whl-ubuntu-22.04-int.s3
+    passed: [build-wheel-ubuntu-22.04-int]
+  - get: tester-ubuntu-22.04.docker
+  - task: test
+    image: tester-ubuntu-22.04.docker
+    file: repo.git/ci/tasks/test-linux.yml
+    input_mapping: { wheel-dir: rc-whl-ubuntu-22.04-int.s3}
+    params:
+      <<: *license-test-params
+      PLATFORM: ubuntu-22.04
+      TOX_ENVS: py310
+
+- name: valgrind
+  max_in_flight: 1
+  on_failure:
+    try:
+      put: engine-gchat
+      inputs: []
+      no_get: true
+      params:
+        state: failure
+  on_error:
+    try:
+      put: engine-gchat
+      inputs: []
+      no_get: true
+      params:
+        state: error
+  on_abort:
+    try:
+      put: engine-gchat
+      inputs: []
+      no_get: true
+      params:
+        state: abort
+  plan:
+  - get: repo-24h.git
+    trigger: ((trigger))
+    params:
+      submodules: [conan-profiles, pix4d_build_tools, vortex-testdata]
+      disable_git_lfs: true
+  - get: valgrind-cpython-ubuntu-22.04.docker
+  - task: valgrind
+    image: valgrind-cpython-ubuntu-22.04.docker
+    file: repo-24h.git/ci/tasks/valgrind.yml
+    input_mapping: { src-repo: repo-24h.git }
+    params:
+      <<: *conan-params
+      CONAN_PROFILE: conan-profiles/.conan/profiles/gcc-ubuntu-22.04
+      PLATFORM: ubuntu-22.04
+      VORTEX_WITH_VALGRIND: 1
+
+### Windows ##############################################################################
+
+- name: build-wheel-windows-int
+  <<: *base-job
+  plan:
+  - get: repo.git
+    passed: [code-check]
+    trigger: false
+    params:
+      submodules: [conan-profiles, pix4d_build_tools]
+      disable_git_lfs: true
+  - *pending
+  - task: build-wheel
+    tags: [vs2019]
+    file: repo.git/ci/tasks/build-wheel-windows.yml
+    input_mapping: { src-repo: repo.git }
+    params:
+      <<: *conan-params
+      CONAN_PROFILE: conan-profiles\.conan\profiles\msvc2019Release
+  - put: rc-whl-windows-int.s3
+    inputs: [rc-build]
+    no_get: true
+    params:
+      file: rc-build/pix4dvortex-*.whl
+
+- name: build-wheel-windows
+  <<: *base-job
+  plan:
+  - get: repo.git
+    passed: [code-check]
+    trigger: true
+    params:
+      submodules: [conan-profiles, pix4d_build_tools]
+      disable_git_lfs: true
+  - *pending
+  - task: build-wheel
+    tags: [vs2019]
+    file: repo.git/ci/tasks/build-wheel-windows.yml
+    input_mapping: { src-repo: repo.git }
+    params:
+      <<: *conan-params
+      CONAN_PROFILE: conan-profiles\.conan\profiles\msvc2019Release
+      VORTEX_WITH_AUTH: 1
+  - put: rc-whl-windows.s3
+    inputs: [rc-build]
+    no_get: true
+    params:
+      file: rc-build/pix4dvortex_ext-*.whl
+
+- name: test-windows
+  <<: *base-job
+  plan:
+  - get: repo.git
+    passed: [build-wheel-windows]
+    trigger: true
+    params:
+      submodules: [vortex-testdata, pix4d-opf-spec]
+      disable_git_lfs: true
+  - *pending
+  - get: rc-whl-windows.s3
+    passed: [build-wheel-windows]
+  - task: test
+    tags: [windows-tester]
+    file: repo.git/ci/tasks/test-windows.yml
+    input_mapping: { wheel-dir: rc-whl-windows.s3}
+    params:
+      <<: *license-test-params
+
+- name: test-windows-int
+  <<: *base-job
+  plan:
+  - get: repo.git
+    passed: [build-wheel-windows-int]
+    trigger: true
+    params:
+      submodules: [vortex-testdata, pix4d-opf-spec]
+      disable_git_lfs: true
+  - *pending
+  - get: rc-whl-windows-int.s3
+    passed: [build-wheel-windows-int]
+  - task: test
+    tags: [windows-tester]
+    file: repo.git/ci/tasks/test-windows.yml
+    input_mapping: { wheel-dir: rc-whl-windows-int.s3}
+    params:
+      <<: *license-test-params
+
+- name: test-examples
+  <<: *base-job
+  plan:
+  - get: biweekly-7-30.cron
+    trigger: ((trigger))
+  - get: repo.git
+    passed: [build-wheel-ubuntu-22.04-int]
+    params:
+      submodules: [vortex-testdata]
+      disable_git_lfs: true
+  - *pending
+  - get: rc-whl-ubuntu-22.04-int.s3
+    passed: [build-wheel-ubuntu-22.04-int]
+  - get: tester-ubuntu-22.04.docker
+  - task: test
+    image: tester-ubuntu-22.04.docker
+    file: repo.git/ci/tasks/test-linux.yml
+    input_mapping: { wheel-dir: rc-whl-ubuntu-22.04-int.s3}
+    params:
+      PLATFORM: ubuntu-22.04
+      TOX_ENVS: py310-examples
+
+- name: build-doc
+  <<: *base-job
+  plan:
+  - get: repo.git
+    passed:
+      - build-wheel-ubuntu-22.04
+    trigger: true
+    params: {submodules: [sphinx_pix4d_theme] }
+  - *pending
+  - get: tester-ubuntu-22.04.docker
+  - get: rc-whl-ubuntu-22.04.s3
+    passed:
+      - build-wheel-ubuntu-22.04
+  - task: make-docs
+    image: tester-ubuntu-22.04.docker
+    config:
+      platform: linux
+      inputs:
+      - name: repo.git
+      - name: rc-whl-ubuntu-22.04.s3
+      outputs:
+        - name: docs
+      run:
+        path: repo.git/ci/scripts/build_docs.sh
+        # TODO: Run as concource once this has been fixed
+        # and integrated: https://github.com/concourse/concourse/issues/403
+        user: root
+        args:
+        - repo.git
+        - docs
+        - rc-whl-ubuntu-22.04.s3/*.whl
+  - put: docs.s3
+    inputs: [docs]
+    no_get: true
+    params:
+      file: docs/html*.tar.gz
+  - put: untarred-docs.s3
+    inputs: [docs]
+    no_get: true
+    params:
+      dir: docs/html
+
+- name: deploy-internal
+  max_in_flight: 1
+  plan:
+  - get: repo.git
+    params:
+      submodules: none
+      disable_git_lfs: true
+    passed: [test-ubuntu-22.04]
+  - get: rc-whl-ubuntu-22.04-int.s3
+
+  # Wheels must be pushed in seperate steps because there is a bug in the current PyPI resource
+  # that prevents multiple wheels from being deployed at once.
+  # https://pix4dbug.atlassian.net/browse/PCI-1465
+  - put: rel-whl.pypi
+    inputs: [rc-whl-ubuntu-22.04-int.s3]
+    no_get: true
+    params:
+      glob: rc-whl-ubuntu-22.04-int.s3/pix4dvortex-*-linux_x86_64.whl
+
+- name: deploy-external
+  max_in_flight: 1
+  plan:
+  - get: repo.git
+    passed: [test-ubuntu-22.04, test-windows]
+    params:
+      submodules: none
+      disable_git_lfs: true
+  - get: rc-whl-ubuntu-22.04.s3
+    passed: [build-wheel-ubuntu-22.04]
+  - get: rc-whl-windows.s3
+    passed: [build-wheel-windows]
+  - get: docs.s3
+    passed: [build-doc]
+  - get: rel-docs.git
+  - get: tester-ubuntu-22.04.docker
+
+  - task: ship-web-docs
+    image: tester-ubuntu-22.04.docker
+    file: repo.git/ci/tasks/ship-web-docs.yml
+
+  - put: rel-whl-ubuntu-22.04.s3
+    inputs: [rc-whl-ubuntu-22.04.s3]
+    no_get: true
+    params:
+      acl: bucket-owner-full-control
+      file: rc-whl-ubuntu-22.04.s3/pix4dvortex_ext-*-linux_x86_64.whl
+
+  - put: rel-whl-windows.s3
+    inputs: [rc-whl-windows.s3]
+    no_get: true
+    params:
+      acl: bucket-owner-full-control
+      file: rc-whl-windows.s3/pix4dvortex_ext-*-win_amd64.whl
+
+  - put: rel-docs.s3
+    inputs: [docs.s3]
+    no_get: true
+    params:
+      acl: bucket-owner-full-control
+      file: docs.s3/htmldoc-*.tar.gz
+
+  - put: rel-docs.git
+    inputs: [rel-docs.git]
+    no_get: true
+    params:
+      repository: rel-docs.git
+
+
+  ######### Dependencies (conan) #########
+
+### Ubuntu 22.04 Jammy Jellyfish #########################################################
+
+- name: conan-build-dependencies-ubuntu-22.04
+  <<: *base-job
+  disable_manual_trigger: ((trigger))
+  plan:
+    - get: repo.git
+      params:
+        submodules: [conan-profiles, pix4d_build_tools]
+        disable_git_lfs: true
+
+    - get: conan-builder-ubuntu-22.04.docker
+    - task: build-dependencies-ubuntu-22.04
+      image: conan-builder-ubuntu-22.04.docker
+      file: repo.git/ci/tasks/conan-build-dependencies-linux.yml
+      params:
+        <<: *conan-pkg-params
+        PLATFORM: ubuntu-22.04
+        CONAN_PROFILE: conan-profiles/.conan/profiles/gcc-ubuntu-22.04
+        VORTEX_WITH_AUTH: 1
+        private_keys: [((github_ssh_key_base64))]
+
+- name: conan-build-dependencies-ubuntu-22.04-cuda
+  <<: *base-job
+  disable_manual_trigger: ((trigger))
+  plan:
+    - get: repo.git
+      params:
+        submodules: [conan-profiles, pix4d_build_tools]
+        disable_git_lfs: true
+
+    - get: conan-builder-ubuntu-22.04-cuda.docker
+    - task: build-dependencies-ubuntu-22.04
+      image: conan-builder-ubuntu-22.04-cuda.docker
+      file: repo.git/ci/tasks/conan-build-dependencies-linux.yml
+      params:
+        <<: *conan-pkg-params
+        PLATFORM: ubuntu-22.04
+        CONAN_PROFILE: conan-profiles/.conan/profiles/gcc-ubuntu-22.04
+        VORTEX_WITH_AUTH: 1
+        private_keys: [((github_ssh_key_base64))]
+
+- name: conan-build-dependencies-ubuntu-22.04-dbg
+  <<: *base-job
+  disable_manual_trigger: ((trigger))
+  plan:
+    - get: repo.git
+      params:
+        submodules: [conan-profiles, pix4d_build_tools]
+        disable_git_lfs: true
+
+    - get: biweekly-7-30.cron
+      trigger: ((trigger))
+
+    - get: conan-builder-ubuntu-22.04-cuda.docker
+    - task: build-dependencies-ubuntu-22.04
+      image: conan-builder-ubuntu-22.04-cuda.docker
+      file: repo.git/ci/tasks/conan-build-dependencies-linux.yml
+      params:
+        <<: *conan-pkg-params
+        PLATFORM: ubuntu-22.04
+        CONAN_PROFILE: conan-profiles/.conan/profiles/gcc-ubuntu-22.04
+        VORTEX_WITH_AUTH: 1
+        BUILD_TYPE: Debug
+        private_keys: [((github_ssh_key_base64))]
+
+### Windows ##############################################################################
+
+- name: conan-build-dependencies-windows
+  <<: *base-job
+  disable_manual_trigger: ((trigger))
+  plan:
+    - get: repo.git
+      params:
+        submodules: [conan-profiles, pix4d_build_tools]
+        disable_git_lfs: true
+
+    - task: build-dependencies-windows
+      tags: [vs2019]
+      file: repo.git/ci/tasks/conan-build-dependencies-windows.yml
+      params:
+        <<: *conan-pkg-params
+        PLATFORM: windows
+        CONAN_PROFILE: conan-profiles\.conan\profiles\msvc2019Release
+        VORTEX_WITH_AUTH: 1
+        private_keys: [((github_ssh_key_base64))]
+
+
+### Perftracker Smoke testing ##########################################################
+
+- name: perftracker-registration
+  <<: *base-job
+  disable_manual_trigger: ((trigger))
+  plan:
+    - in_parallel:
+      - get: python.docker
+      - get: repo.git
+        params: { disable_git_lfs: true, submodules: [pix4d_build_tools] }
+      - get: rc-whl-ubuntu-22.04-int.s3
+        passed: [build-wheel-ubuntu-22.04-int]
+
+    - task: perftracker-registration
+      image: python.docker
+      file: repo.git/ci/tasks/perftracker-registration.yml
+      params:
+        APP_NAME: "vortex"
+        BRANCH: ((branch))
+        S3_LOCATION: artifacts/((project))/((branch))
+        BUCKET_NAME: ci-pix4d-concourse-pipeline
+        REPO_PATH: "repo.git/"
+
+
+- name: perftracker-job-creator
+  <<: *base-job
+  plan:
+    - get: python.docker
+    - get: repo.git
+      passed: [perftracker-registration]
+      trigger: true
+      params: { disable_git_lfs: true, submodules: [pix4d_build_tools] }
+    - get: rc-whl-ubuntu-22.04-int.s3
+      passed: [perftracker-registration]
+
+    - *pending
+
+    - task: create-test-jobs
+      image: python.docker
+      file: repo.git/ci/tasks/perftracker-job-creator.yml
+      params:
+        BRANCH: ((branch))
+        TEMPLATE: "vortex-smokeQA-tmp"
+        REPO_PATH: "repo.git/"
+
+
+######### Groups #########
+
+groups:
+
+  - name: dev
+    jobs:
+      - code-check
+      - build-wheel-ubuntu-22.04-int
+      - build-wheel-ubuntu-22.04
+      - build-wheel-windows-int
+      - build-wheel-windows
+      - test-ubuntu-22.04
+      - test-ubuntu-22.04-int
+      - valgrind
+      - test-windows
+      - test-windows-int
+      - test-examples
+      - build-doc
+
+  - name: release
+    jobs:
+      - deploy-internal
+      - deploy-external
+
+  - name: conan
+    jobs:
+      - conan-build-dependencies-ubuntu-22.04
+      - conan-build-dependencies-ubuntu-22.04-cuda
+      - conan-build-dependencies-ubuntu-22.04-dbg
+      - conan-build-dependencies-windows
+
+  - name: perftracker-smoke-test
+    jobs:
+      - perftracker-registration
+      - perftracker-job-creator

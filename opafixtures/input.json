@@ -1,0 +1,17 @@
+{
+    "action":"SaveConfig",
+    "pipeline":"test-put",
+    "data":{
+        "jobs":[
+            {"max_in_flight":1,"name":"standard-path","on_error":{"inputs":["repo.git"],"no_get":true,"params":{"state":"error"},"put":"gh-status"},"on_failure":{"inputs":["repo.git"],"no_get":true,"params":{"state":"failure"},"put":"gh-status"},"on_success":{"inputs":["repo.git"],"no_get":true,"params":{"state":"success"},"put":"gh-status"},"plan":[{"get":"repo.git"},{"inputs":["repo.git"],"no_get":true,"params":{"state":"pending"},"put":"gh-status"}]},
+            {"max_in_flight":1,"name":"do-path","on_error":{"do":{"inputs":["repo.git"],"no_get":true,"params":{"state":"error"},"put":"gh-status-do"}}, "plan":[{"do":[{"get":"repo.git"},{"inputs":["repo.git"],"no_get":true,"params":{"state":"pending"},"put":"gh-status"}]}]},
+            {"max_in_flight":1,"name":"in-parallel-path","plan":[{"in_parallel":[{"get":"repo.git"},{"inputs":["repo.git"],"no_get":true,"params":{"state":"pending"},"put":"gh-status"}]}]}
+        ],
+        "resource_types":[
+            {"check_every":"24h","name":"cogito","source":{"repository":"pix4d/cogito","tag":"latest"},"type":"registry-image"}
+        ],
+        "resources":[
+            {"check_every":"24h","icon":"git","name":"repo.git","source":{"branch":"master","private_key":"((github_ssh_key))","uri":"git@github.com:pix4d/test-bootgen-single-project.git"},"type":"git"},{"check_every":"never","name":"gh-status","source":{"access_token":"((github_repo_status_token))","owner":"pix4d","repo":"test-bootgen-single-project"},"type":"cogito"}
+        ]
+    }
+}

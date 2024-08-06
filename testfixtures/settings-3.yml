@@ -1,0 +1,12 @@
+project: engine-python
+trigger: false
+win_trigger: true
+tag_docker_latest: false
+tag_prefix: garbage
+pkg_name: pix4dengine
+offline_build: 0
+embedded_license_svr: ''
+gchat_hook:
+team: developers
+deploy_bucket: test-pix4d-lib-public
+branch: foo

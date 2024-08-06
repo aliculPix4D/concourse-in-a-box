@@ -135,6 +135,23 @@ deny contains msg if {
 	])
 }
 
+# METADATA
+# title: Misconfigured put step
+# description: Put step must be properly configured
+# related_resources:
+# - https://pix4dbug.atlassian.net/wiki/x/TBD
+# scope: rule
+deny contains msg if {
+	input.action in {"SaveConfig", "SetPipeline"}
+	count(put_steps) != count(valid_put_steps)
+	some ps in (put_steps - valid_put_steps)
+	msg := sprintf("Violation: %s. Found misconfigured put step: %s. Documentation: %s", [
+		rego.metadata.rule().description,
+		ps.put,
+		rego.metadata.rule().related_resources[0].ref,
+	])
+}
+
 git_resources contains r.name if {
 	some r in input.data.resources
 	r.type == "git"
@@ -164,6 +181,20 @@ valid_git_resources if {
 	count(git_resources_with_webhooks & git_resources_with_check) == 0
 	count(git_resources_with_webhooks | git_resources_with_check) == count(git_resources)
 }
+
+put_steps contains v if {
+  [_, v] := walk(input.data.jobs)
+  "put" in object.keys(v)
+}
+
+valid_put_steps contains step if {
+  some step in put_steps
+  "put" in object.keys(step)
+  "no_get" in object.keys(step)
+  step.no_get
+  "inputs" in object.keys(step)
+}
+
 
 # METADATA
 # title: Parallel builds
@@ -200,3 +231,4 @@ soft_deny contains msg if {
 		rego.metadata.rule().related_resources[0].ref,
 	])
 }
+

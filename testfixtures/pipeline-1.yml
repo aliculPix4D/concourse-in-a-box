@@ -51,6 +51,12 @@ jobs:
 
 - name: do-path
   max_in_flight: 1
+  on_error:
+    do:
+      put: gh-status-do
+      no_get: true
+      inputs: [repo.git]
+      params: {state: error}
   plan:
   - do:
     - get: repo.git

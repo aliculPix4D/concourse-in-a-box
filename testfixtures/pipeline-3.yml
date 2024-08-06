@@ -1,0 +1,703 @@
+s3-creds: &s3-creds
+  access_key_id: ((concourse_user_access_key))
+  secret_access_key: ((concourse_user_secret_key))
+s3-params: &s3-bucket
+  bucket: ci-pix4d-concourse-pipeline
+  region_name: eu-west-1
+  <<: *s3-creds
+s3-code-deploy-params: &s3-code-deploy-params
+  bucket: ((deploy_bucket))
+  region_name: us-east-1
+  path: "engine/"
+  options:
+    # FIXME! `--recursive` is _currently_ needed to copy a directory :-(
+    - --recursive
+    - --acl bucket-owner-full-control
+  <<: *s3-creds
+
+conan-params: &conan-params
+  CONAN_URL: https://conan.ci.pix4d.com
+  CONAN_LOGIN_USERNAME: ((conan_ro_username))
+  CONAN_PASSWORD: ((conan_ro_password))
+conan-build-params: &conan-build-params
+  CONAN_URL: https://conan.ci.pix4d.com
+  CONAN_LOGIN_USERNAME: ((conan_rw_username))
+  CONAN_PASSWORD: ((conan_rw_password))
+  CONAN_BRANCH: ((branch))
+  CONAN_UPLOAD: 1
+params: &params_tests
+  PATH_TO_GIT_REPO: repo.git
+  PATH_TO_DEB: rc-deb-ubuntu-18.04.s3
+params: &params_auth_integration_tests
+  ENGINE_AUTH_TEST_ACCOUNT_EMAIL: ((engine_auth_test_account_email))
+  ENGINE_AUTH_TEST_ACCOUNT_PASSWORD: ((engine_auth_test_account_password))
+  ENGINE_EMBEDDED_LICENSE_SVR: ((embedded_license_svr))
+  <<: *params_tests
+params: &params_integration_tests
+  ENGINE_TEST_ACCOUNT_EMAIL: ((engine_test_account_email))
+  ENGINE_TEST_ACCOUNT_PASSWORD: ((engine_test_account_password))
+  ENGINE_TEST_ACCOUNT_LICENSE_KEY: ((engine_test_account_license_key))
+  ENGINE_EMBEDDED_LICENSE_SVR: ((embedded_license_svr))
+  <<: *params_tests
+
+base-job: &base-job
+  max_in_flight: 1
+  on_success:
+    put: github-status
+    inputs:
+    - repo.git
+    no_get: true
+    params:
+      state: success
+  on_failure:
+    put: github-status
+    inputs:
+    - repo.git
+    no_get: true
+    params:
+      state: failure
+  on_error:
+    put: github-status
+    inputs:
+    - repo.git
+    no_get: true
+    params:
+      state: error
+  on_abort:
+    put: github-status
+    inputs:
+    - repo.git
+    no_get: true
+    params:
+      state: abort
+
+pending:
+  - &pending
+    put: github-status
+    inputs:
+    - repo.git
+    no_get: true
+    params:
+      state: pending
+
+
+engine-pool-source: &engine-pool-source
+  uri: git@github.com:pix4d/concourse-locks-engine.git
+  branch: master
+  pool:
+  retry_delay: 60s
+  private_key: ((github_ssh_key))
+  prometheus_push_gateway: http://prometheus.internal:9091
+
+acquire-auth-integration-tests-lock: &acquire-auth-integration-tests-lock
+  # don't disable the implicit get. The ensure step: release-auth-integration-tests-lock-at-end
+  # requires the auth-integration-tests.pool input that is fetched using the implicit get only.
+  put: auth-integration-tests.pool
+  inputs: []
+  params: {acquire: true}
+
+release-auth-integration-tests-lock-at-end: &release-auth-integration-tests-lock-at-end
+  ensure:
+    put: auth-integration-tests.pool
+    inputs: [auth-integration-tests.pool]
+    no_get: true
+    params: {release: auth-integration-tests.pool}
+
+shallow-clone: &shallow-clone
+  params:
+    submodules: none
+    disable_git_lfs: true
+
+
+jobs:
+
+- name: lint
+  <<: *base-job
+  plan:
+  - get: repo.git
+    trigger: ((trigger))
+  - *pending
+  - get: engine-tester-ubuntu-18.04.docker
+  - task: lint-ubuntu-18.04
+    image: engine-tester-ubuntu-18.04.docker
+    config:
+      platform: linux
+      inputs:
+      - name: repo.git
+      run:
+        path: repo.git/ci/scripts/lint.sh
+      params:
+        <<: *params_tests
+
+- name: build-pkg
+  <<: *base-job
+  plan:
+  - get: repo.git
+    passed: [unit-tests]
+    params: { disable_git_lfs: true, submodules: [conan-profiles, pix4d_build_tools] }
+    trigger: true
+  - *pending
+  - get: engine-builder-ubuntu-18.04.docker
+  - task: build-ubuntu-18.04-pkg
+    image: engine-builder-ubuntu-18.04.docker
+    config:
+      platform: linux
+      inputs:
+      - name: repo.git
+      outputs:
+      - name: rc-build
+      run:
+        path: repo.git/ci/scripts/build_deb.sh
+        args:
+        - repo.git
+        - rc-build
+      params:
+        <<: *conan-params
+        CONAN_PROFILE: ./repo.git/conan-profiles/.conan/profiles/gcc-ubuntu-18.04
+        ENGINE_OFFLINE: ((offline_build))
+  - put: rc-deb-ubuntu-18.04.s3
+    inputs: [rc-build]
+    no_get: true
+    params: {file: rc-build/python3-((pkg_name))_*.deb}
+  - put: rc-whl-ubuntu-18.04.s3
+    inputs: [rc-build]
+    no_get: true
+    params: {file: rc-build/((pkg_name))-*.whl}
+
+- name: unit-tests
+  <<: *base-job
+  plan:
+  - get: repo.git
+    passed: [lint]
+    trigger: true
+    params: {submodules: [sphinx_pix4d_theme] }
+  - *pending
+  - get: engine-tester-ubuntu-18.04.docker
+  - in_parallel:
+    - task: run-unit-tests-ubuntu-18.04
+      image: engine-tester-ubuntu-18.04.docker
+      config:
+        platform: linux
+        inputs:
+        - name: repo.git
+        run:
+          path: repo.git/ci/scripts/run_tests.sh
+          args: [unit]
+        params:
+          <<: *params_tests
+
+- name: pyengine-tests
+  <<: *base-job
+  plan:
+  - get: repo.git
+    passed: [build-pkg]
+    params: { disable_git_lfs: true, submodules: [testdata] }
+    trigger: false
+  - *pending
+  - get: rc-whl-ubuntu-18.04.s3
+    passed: [build-pkg]
+  - get: engine-builder-ubuntu-18.04.docker
+  - task: test-pyengine-ubuntu-18.04
+    image: engine-builder-ubuntu-18.04.docker
+    config:
+      platform: linux
+      inputs:
+      - name: repo.git
+      - name: rc-whl-ubuntu-18.04.s3
+      run:
+        path: repo.git/ci/scripts/test_pyengine.sh
+        args:
+        - repo.git
+        - rc-whl-ubuntu-18.04.s3
+      params:
+        <<: *conan-params
+        ENGINE_OFFLINE: ((offline_build))
+        ENGINE_EMBEDDED_LICENSE_SVR: ((embedded_license_svr))
+
+- name: build-doc
+  <<: *base-job
+  plan:
+  - get: repo.git
+    passed:
+      - build-pkg
+    trigger: true
+    params: {submodules: [sphinx_pix4d_theme] }
+  - *pending
+  - get: tester-ubuntu-18.04.docker
+  - get: rc-whl-ubuntu-18.04.s3
+    passed:
+      - build-pkg
+  - task: make-docs
+    image: tester-ubuntu-18.04.docker
+    config:
+      platform: linux
+      inputs:
+      - name: repo.git
+      - name: rc-whl-ubuntu-18.04.s3
+      outputs:
+        - name: docs
+      run:
+        path: repo.git/ci/scripts/build_docs.sh
+        # TODO: Run as concource once this has been fixed
+        # and integrated: https://github.com/concourse/concourse/issues/403
+        user: root
+        args:
+        - repo.git
+        - docs
+        - rc-whl-ubuntu-18.04.s3/*.whl
+  - put: docs.s3
+    inputs: [docs]
+    no_get: true
+    params:
+      file: docs/html*.tar.gz
+  - put: untarred-docs.s3
+    inputs: [docs]
+    no_get: true
+    params:
+      dir: docs/html
+
+- name: auth-integration-tests
+  <<: *base-job
+  <<: *release-auth-integration-tests-lock-at-end
+  plan:
+  - *acquire-auth-integration-tests-lock
+  - get: repo.git
+    passed:
+      - build-pkg
+    trigger: true
+    <<: *shallow-clone
+  - *pending
+  - get: rc-deb-ubuntu-18.04.s3
+    passed:
+      - build-pkg
+  - get: engine-tester-ubuntu-18.04.docker
+
+  - task: run-auth-tests-linux
+    image: engine-tester-ubuntu-18.04.docker
+    config:
+      platform: linux
+      inputs:
+      - name: repo.git
+      - name: rc-deb-ubuntu-18.04.s3
+      run:
+        path: repo.git/ci/scripts/run_tests.sh
+        args: [authinte]
+      params:
+        <<: *params_auth_integration_tests
+
+- name: integration-tests
+  <<: *base-job
+  plan:
+  - get: repo.git
+    passed: [build-pkg]
+    trigger: true
+  - *pending
+  - get: rc-deb-ubuntu-18.04.s3
+    passed: [build-pkg]
+  - get: engine-tester-ubuntu-18.04.docker
+
+  - task: run-integration-tests-linux
+    image: engine-tester-ubuntu-18.04.docker
+    config:
+      platform: linux
+      inputs:
+      - name: repo.git
+      - name: rc-deb-ubuntu-18.04.s3
+      run:
+        path: repo.git/ci/scripts/run_tests.sh
+        args: [inte]
+      params:
+        <<: *params_integration_tests
+
+- name: code-samples
+  <<: *base-job
+  plan:
+  - get: repo.git
+    passed: [build-pkg]
+    trigger: true
+  - *pending
+  - get: rc-deb-ubuntu-18.04.s3
+    passed: [build-pkg]
+  - get: engine-tester-ubuntu-18.04.docker
+
+  - task: run-code-samples-linux
+    image: engine-tester-ubuntu-18.04.docker
+    config:
+      platform: linux
+      inputs:
+      - name: repo.git
+      - name: rc-deb-ubuntu-18.04.s3
+      run:
+        path: repo.git/ci/scripts/run_tests.sh
+        args: [samp]
+      params:
+        <<: *params_integration_tests
+
+- name: qa-app-tests
+  <<: *base-job
+  plan:
+  - get: repo.git
+    passed: [build-pkg]
+    trigger: true
+  - *pending
+  - get: rc-deb-ubuntu-18.04.s3
+    passed: [build-pkg]
+  - get: engine-tester-ubuntu-18.04.docker
+
+  - task: run-perftracker-app-tests-linux
+    image: engine-tester-ubuntu-18.04.docker
+    config:
+      platform: linux
+      inputs:
+      - name: repo.git
+      - name: rc-deb-ubuntu-18.04.s3
+      run:
+        path: repo.git/ci/scripts/run_tests.sh
+        args: [perftracker]
+      params:
+        <<: *params_integration_tests
+
+- name: qa-artifacts
+  <<: *base-job
+  plan:
+  - get: repo.git
+    passed: [qa-app-tests]
+  - get: engine-base-ubuntu-18.04.docker
+  - task: create-perftracker-artifacts
+    image: engine-base-ubuntu-18.04.docker
+    config:
+      platform: linux
+      inputs:
+      - name: repo.git
+      outputs:
+      - name: qa-artifacts
+      run:
+        path: repo.git/ci/scripts/qa-artifacts.sh
+        args:
+        - repo.git
+        - qa-artifacts
+  - put: qa-artifacts.s3
+    inputs: [qa-artifacts]
+    no_get: true
+    params: {file: qa-artifacts/engine-app-*-app.py}
+  - put: qa-artifacts.s3
+    inputs: [qa-artifacts]
+    no_get: true
+    params: {file: qa-artifacts/engine-app-*-runner.py}
+  - put: qa-artifacts.s3
+    inputs: [qa-artifacts]
+    no_get: true
+    params: {file: qa-artifacts/engine-app-*-extractor.py}
+
+- name: perftracker-register-engine-app
+  <<: *base-job
+  plan:
+  - get: qa-artifacts.s3
+    passed: [qa-artifacts]
+  - get: repo.git
+  - task: perftracker-registration
+    params:
+      BRANCH: ((branch))
+      APP: engine-app
+      PART: app
+    file: repo.git/ci/tasks/perftracker-registration.yml
+
+- name: perftracker-register-engine-app-metrics
+  <<: *base-job
+  plan:
+  - get: qa-artifacts.s3
+    passed: [qa-artifacts]
+  - get: repo.git
+  - task: perftracker-registration
+    params:
+      BRANCH: ((branch))
+      APP: engine-app
+      PART: metrics
+    file: repo.git/ci/tasks/perftracker-registration.yml
+
+- name: ship-it
+  plan:
+  - get: repo.git
+    passed: [build-doc]
+  - get: rc-whl-ubuntu-18.04.s3
+  - get: rc-deb-ubuntu-18.04.s3
+    passed: [integration-tests, auth-integration-tests, code-samples]
+  - get: docs.s3
+    passed: [build-doc]
+  - get: github-docs-release.git
+  - get: shipit.docker
+
+  - task: ship-pkg
+    image: shipit.docker
+    config:
+      platform: linux
+      inputs:
+      - name: rc-whl-ubuntu-18.04.s3
+      - name: rc-deb-ubuntu-18.04.s3
+      - name: repo.git
+      outputs:
+      - name: release-build
+      params:
+        AWS_ACCESS_KEY_ID: ((concourse_user_access_key))
+        AWS_SECRET_ACCESS_KEY: ((concourse_user_secret_key))
+        S3_BUCKET: ((deploy_bucket))
+      run:
+        path: repo.git/ci/scripts/ship_pkg.sh
+        args:
+          - release-build
+          - rc-whl-ubuntu-18.04.s3/*.whl
+          - rc-deb-ubuntu-18.04.s3/*.deb
+  - put: release-deb-whl.s3
+    inputs: [release-build]
+    no_get: true
+    params:
+      dir: release-build
+
+  - task: ship-docs
+    image: shipit.docker
+    config:
+      platform: linux
+      inputs:
+      - name: docs.s3
+      - name: repo.git
+      - name: github-docs-release.git
+      - name: rc-whl-ubuntu-18.04.s3
+      outputs:
+      - name: release-docs
+      - name: github-docs-release.git
+      run:
+        path: repo.git/ci/scripts/ship_docs.sh
+        args:
+        - docs.s3
+        - release-docs/docs
+        - github-docs-release.git
+        - rc-whl-ubuntu-18.04.s3/*.whl
+
+  - put: release-docs.s3
+    inputs: [release-docs]
+    no_get: true
+    params:
+      file: release-docs/docs/html*.tar.gz
+  - put: github-docs-release.git
+    inputs: [github-docs-release.git]
+    no_get: true
+    params:
+      repository: github-docs-release.git
+  - put: release-deb-ubuntu-18.04.s3
+    inputs: [release-build]
+    no_get: true
+    params:
+      file: release-build/*/python3-((pkg_name))_*.deb
+
+######### Dependencies (conan) #########
+
+- name: conan-build-dependencies
+  <<: *base-job
+  disable_manual_trigger: ((trigger))
+  plan:
+    - get: repo.git
+      params: { disable_git_lfs: true, submodules: [pix4d_build_tools, conan-profiles] }
+
+    - get: conan-builder-ubuntu-18.04.docker
+    - task: build-dependencies-ubuntu-18.04
+      image: conan-builder-ubuntu-18.04.docker
+      file: repo.git/pix4d_build_tools/ci/tasks/conan-build-dependencies-linux.yml
+      params:
+        <<: *conan-build-params
+        PLATFORM: ubuntu-18.04
+        CONAN_PROFILE: ./repo.git/conan-profiles/.conan/profiles/gcc-ubuntu-18.04
+        CONAN_BUILD_CMD_EXTRA: -o boost:shared=True
+        private_keys: [((github_ssh_key_base64))]
+
+####################### GROUPS ##########################################################
+
+groups:
+  - name: dev
+    jobs:
+      - lint
+      - unit-tests
+      - pyengine-tests
+      - auth-integration-tests
+      - integration-tests
+      - code-samples
+      - build-pkg
+      - build-doc
+      - ship-it
+  - name: release
+    jobs:
+      - ship-it
+  - name: qa
+    jobs:
+      - qa-app-tests
+      - qa-artifacts
+      - perftracker-register-engine-app
+      - perftracker-register-engine-app-metrics
+
+  - name: conan
+    jobs:
+      - conan-build-dependencies
+
+
+####################### RESOURCES #######################################################
+
+resource_types:
+- name: s3-simple
+  type: registry-image
+  check_every: 24h
+  source:
+    repository: docker.ci.pix4d.com/s3-resource-simple
+    tag: latest
+    username: ((docker_cloud_pix4d_user))
+    password: ((docker_cloud_pix4d_password))
+
+- name: cogito
+  type: registry-image
+  check_every: 24h
+  source:
+    repository: pix4d/cogito
+    tag: latest
+
+#########################################################################################
+
+resources:
+
+- name: repo.git
+  type: git
+  webhook_token: ((concourse_gh_webhook))
+  source:
+    branch: ((branch))
+    uri: git@github.com:Pix4D/pix4d-engine.git
+    private_key: ((github_ssh_key))
+
+- name: release-deb-ubuntu-18.04.s3
+  type: s3
+  source:
+    regexp: final/((project))/((branch))/python3-((pkg_name))_(.*).deb
+    <<: *s3-bucket
+
+- name: release-deb-whl.s3
+  type: s3-simple
+  check_every: never
+  source:
+    <<: *s3-code-deploy-params
+
+- name: docs.s3
+  type: s3
+  source:
+    regexp: artifacts/((project))/((branch))/docs/htmldoc-(.*).tar.gz
+    <<: *s3-bucket
+
+- name: release-docs.s3
+  type: s3
+  source:
+    regexp: final/((project))/((branch))/docs/htmldoc-(.*).tar.gz
+    <<: *s3-bucket
+
+- name: untarred-docs.s3
+  type: s3-simple
+  check_every: never
+  source:
+    <<: *s3-bucket
+    region: eu-west-1  # region key name differs from resource `s3` region key name...
+    path: artifacts/((project))/((branch))/docs/
+    sync: false # Disable downloading.
+    options:
+      # FIXME! `--recursive` is _currently_ needed to copy a directory :-(
+      - --recursive
+
+- name: github-docs-release.git
+  type: git
+  webhook_token: ((concourse_gh_webhook))
+  source:
+    uri: git@github.com:Pix4D/pix4d-engine-docs.git
+    branch: master
+    private_key: ((docs_github_deploy_key_private))
+
+- name: github-status
+  type: cogito
+  check_every: never
+  source:
+    owner: pix4d
+    repo: pix4d-engine
+    access_token: ((github_repo_status_token))
+    gchat_webhook: ((gchat_hook))
+
+- name: rc-deb-ubuntu-18.04.s3
+  type: s3
+  source:
+    regexp: artifacts/((project))/((branch))/python3-((pkg_name))_(.*).deb
+    <<: *s3-bucket
+- name: rc-whl-ubuntu-18.04.s3
+  type: s3
+  source:
+    regexp: artifacts/((project))/((branch))/((pkg_name))-(.*)-linux_x86_64.whl
+    <<: *s3-bucket
+- name: qa-artifacts.s3
+  type: s3
+  source:
+    regexp: artifacts/((project))/((branch))/QA/(.*)
+    <<: *s3-bucket
+
+# See https://pix4dbug.atlassian.net/wiki/spaces/pm12/pages/920158478/Concourse+scheduling+and+queuing
+- name: auth-integration-tests.pool
+  type: pool
+  source:
+    <<: *engine-pool-source
+    pool: auth-integration-tests
+
+- name: engine-base-ubuntu-18.04.docker
+  type: registry-image
+  check_every: 24h
+  source:
+    repository: docker.ci.pix4d.com/engine-base-ubuntu-18.04
+    tag: 20220803145148
+    username: ((docker_cloud_pix4d_user))
+    password: ((docker_cloud_pix4d_password))
+
+- name: engine-builder-ubuntu-18.04.docker
+  type: registry-image
+  check_every: 24h
+  source:
+    repository: docker.ci.pix4d.com/engine-builder-ubuntu-18.04
+    tag: 20220803150954
+    username: ((docker_cloud_pix4d_user))
+    password: ((docker_cloud_pix4d_password))
+
+- name: engine-tester-ubuntu-18.04.docker
+  type: registry-image
+  check_every: 24h
+  source:
+    repository: docker.ci.pix4d.com/engine-tester-ubuntu-18.04
+    tag: 20220803145332
+    username: ((docker_cloud_pix4d_user))
+    password: ((docker_cloud_pix4d_password))
+
+- name: tester-ubuntu-18.04.docker
+  type: registry-image
+  check_every: 24h
+  source:
+    username: ((docker_cloud_pix4d_user))
+    password: ((docker_cloud_pix4d_password))
+    repository: docker.ci.pix4d.com/cpp-tester-ubuntu-18.04
+    tag: 20211001112542
+
+- name: shipit.docker
+  type: registry-image
+  check_every: 24h
+  source:
+    repository: docker.ci.pix4d.com/engine-shipit
+    tag: 20220803151256
+    username: ((docker_cloud_pix4d_user))
+    password: ((docker_cloud_pix4d_password))
+
+  # The conan builder image needs to be able to build all dependencies. For this
+  # reason they are defined in the conan-builder repository and shared by all
+  # repos
+- name: conan-builder-ubuntu-18.04.docker
+  type: registry-image
+  check_every: 24h
+  source:
+    repository: docker.ci.pix4d.com/conan-builder-ubuntu-18.04
+    tag: 20230201092322
+    username: ((docker_cloud_pix4d_user))
+    password: ((docker_cloud_pix4d_password))

@@ -1,0 +1,8 @@
+project: pix4d-vortex
+trigger: false
+gchat_hook:
+team: developers
+output_dst: artifacts
+base_version: "2.0"
+deploy_bucket: test-pix4d-lib-public
+branch: foo
